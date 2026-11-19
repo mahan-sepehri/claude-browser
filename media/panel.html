@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--CSP-->
+    <!--BASE-->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claude Browser</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <div id="tabs" hidden></div>
+    <div id="toolbar">
+      <button id="back" class="icon" title="Back (⌘[)" disabled>
+        <svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5" /></svg>
+      </button>
+      <button id="forward" class="icon" title="Forward (⌘])" disabled>
+        <svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5" /></svg>
+      </button>
+      <button id="newtab" class="icon" title="New tab (⌘T)">
+        <svg viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9" /></svg>
+      </button>
+      <button id="reload" class="icon" title="Reload (⌘R)">
+        <svg viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3" /></svg>
+      </button>
+      <form id="urlform" autocomplete="off">
+        <input id="url" spellcheck="false" placeholder="localhost:5173 or a URL" />
+        <div id="suggest" role="listbox" hidden></div>
+      </form>
+      <span id="media" hidden title="This page is using your camera / microphone"></span>
+      <button id="errors" hidden></button>
+      <button id="zoom" hidden title="Reset zoom"></button>
+      <span id="agent" title="Claude is using the browser">Claude</span>
+      <button id="pick" class="icon" title="Pick an element for Claude (⌘⇧C). While picking: ↑ widens to the parent, ↓ narrows back, Shift-click keeps picking, Esc cancels.">
+        <svg viewBox="0 0 16 16"><path d="M2.5 2.5h4M2.5 2.5v4M13.5 2.5h-4M13.5 2.5v4M2.5 13.5h3M2.5 13.5v-3M8 7l6 2.2-2.6 1.1L10.3 13 8 7Z" /></svg>
+      </button>
+      <button id="annotate" class="icon" title="Mark up the page for Claude: draw rectangles or arrows, add a note, send (⌘⇧S)">
+        <svg viewBox="0 0 16 16"><rect x="2" y="3" width="8.5" height="7" rx="1" stroke-dasharray="2 1.6" /><path d="M8.5 13.5 14 8M14 8h-3.2M14 8v3.2" /></svg>
+      </button>
+      <button id="devtools" class="icon" title="DevTools — Console, Network, Elements (⌘⌥I / F12)">
+        <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" /><path d="M1.5 9.5h13M4.5 11.5h2" /></svg>
+      </button>
+      <button id="dock" class="icon" title="Dock DevTools to the bottom" hidden>
+        <svg class="to-bottom" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" /><path d="M1.5 9.5h13" /></svg>
+        <svg class="to-side" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" /><path d="M9.5 2.5v11" /></svg>
+      </button>
+      <label id="devicewrap" class="icon" title="Device size">
+        <svg viewBox="0 0 16 16"><rect x="4.5" y="1.5" width="7" height="13" rx="1.5" /><path d="M7 12.5h2" /></svg>
+        <select id="device">
+          <option value="">Fit panel</option>
+          <option value="393x852m">iPhone 15 · 393×852</option>
+          <option value="375x667m">iPhone SE · 375×667</option>
+          <option value="412x915m">Pixel 8 · 412×915</option>
+          <option value="820x1180m">iPad Air · 820×1180</option>
+          <option value="1280x800">Laptop · 1280×800</option>
+          <option value="1440x900">Desktop · 1440×900</option>
+        </select>
+      </label>
+      <button id="multi" class="icon" title="Side by side: mobile, tablet and desktop at once">
+        <svg viewBox="0 0 16 16"><rect x="1.5" y="5.5" width="3" height="6" rx="0.8" /><rect x="6" y="4" width="4" height="8" rx="0.8" /><rect x="11.5" y="3" width="3" height="10" rx="0.8" /></svg>
+      </button>
+      <button id="more" class="icon" title="More: zoom, appearance, screenshot, restart…">
+        <svg viewBox="0 0 16 16"><path d="M3.5 8h.01M8 8h.01M12.5 8h.01" stroke-width="2.2" /></svg>
+      </button>
+    </div>
+    <div id="menu" hidden></div>
+    <div id="errbox" hidden></div>
+    <div id="ctxmenu" hidden></div>
+    <div id="progress"></div>
+    <div id="permbar" hidden>
+      <span id="permtext"></span>
+      <label><input type="checkbox" id="permremember" /> Remember for this site</label>
+      <button id="permblock">Block</button>
+      <button id="permallow" class="primary">Allow</button>
+    </div>
+    <div id="multibar" hidden>
+      <button class="chip" data-key="mobile">Mobile</button>
+      <button class="chip" data-key="tablet">Tablet</button>
+      <button class="chip" data-key="desktop">Desktop</button>
+      <span class="grow"></span>
+      <span id="multifit"></span>
+      <select id="multiscale" title="Size of the previews">
+        <option value="fit">Fit</option>
+        <option value="0.5">50%</option>
+        <option value="0.75">75%</option>
+        <option value="1">100%</option>
+      </select>
+      <button id="multioff" class="chip">Close</button>
+    </div>
+    <div id="annotbar" hidden>
+      <button class="chip on" data-tool="rect" title="Drag to mark an area (hold ⌥ for an arrow)">Rectangle</button>
+      <button class="chip" data-tool="arrow" title="Drag towards the thing you mean (hold ⌥ for a rectangle)">Arrow</button>
+      <input id="annotnote" placeholder="Draw on the page, then say what should change (optional) — Enter sends" spellcheck="false" />
+      <button id="annotundo" class="chip">Undo</button>
+      <button id="annotcancel" class="chip">Cancel</button>
+      <button id="annotsend" class="chip primary" disabled>Send to Claude</button>
+    </div>
+    <div id="hungbar" hidden>
+      <span>This page isn't responding.</span>
+      <button id="hungwait" class="quiet">Wait</button>
+      <button id="hungreload">Reload page</button>
+    </div>
+    <div id="main">
+    <div id="stage">
+      <div class="pane" id="pane0">
+        <div class="panelabel"></div>
+        <div id="screen" class="screen">
+          <canvas id="canvas"></canvas>
+          <div id="fx" class="fx"></div>
+          <div id="popup" class="popup"></div>
+        </div>
+      </div>
+      <textarea id="kbd" autocapitalize="off" autocomplete="off" spellcheck="false" aria-label="Keyboard input for the shared browser"></textarea>
+      <div id="overlay">
+        <div id="overlaymsg">Connecting to the browser engine…</div>
+        <div id="overlaybar" hidden><div></div></div>
+        <button id="overlayrestart" hidden>Restart browser</button>
+      </div>
+    </div>
+    <div id="drawer" hidden>
+      <div id="splitter" title="Drag to resize"></div>
+      <iframe id="dtframe" title="Chrome DevTools"></iframe>
+      <div id="dtmsg">DevTools will appear once the browser is running…</div>
+    </div>
+    </div>
+    <div id="toast"></div>
+    <!--CONFIG-->
+    <script src="panel.js"></script>
+  </body>
+</html>

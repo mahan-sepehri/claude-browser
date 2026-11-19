@@ -1,0 +1,159 @@
+{
+  "name": "claude-browser",
+  "displayName": "Claude Browser",
+  "description": "A live browser inside VS Code and Cursor, shared with Claude Code: you and Claude see and drive the same tab. Pick elements into the prompt, verify changes after hot reload, measure, fill forms, test every screen size.",
+  "version": "0.31.0",
+  "publisher": "mahan-sepehri",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Testing",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "anthropic",
+    "browser",
+    "mcp",
+    "ai",
+    "agent",
+    "preview",
+    "live preview",
+    "devtools",
+    "inspect element",
+    "element picker",
+    "react",
+    "vite",
+    "next.js",
+    "responsive",
+    "cursor",
+    "web development"
+  ],
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1b1b1d",
+    "theme": "dark"
+  },
+  "homepage": "https://github.com/mahan-sepehri/claude-browser#readme",
+  "bugs": {
+    "url": "https://github.com/mahan-sepehri/claude-browser/issues"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onWebviewPanel:claudeBrowser.panel"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeBrowser.open",
+        "title": "Claude Browser: Open"
+      },
+      {
+        "command": "claudeBrowser.pick",
+        "title": "Claude Browser: Pick Element"
+      },
+      {
+        "command": "claudeBrowser.multi",
+        "title": "Claude Browser: Side by Side (mobile, tablet, desktop)"
+      },
+      {
+        "command": "claudeBrowser.restartDaemon",
+        "title": "Claude Browser: Restart Browser Engine"
+      },
+      {
+        "command": "claudeBrowser.restartCursor",
+        "title": "Claude Browser: Restart Cursor with Browser Control"
+      },
+      {
+        "command": "claudeBrowser.registerMcp",
+        "title": "Claude Browser: Register MCP Server with Claude Code"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claudeBrowser.open",
+        "key": "ctrl+alt+b",
+        "mac": "ctrl+cmd+b"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Browser",
+      "properties": {
+        "claudeBrowser.port": {
+          "type": "number",
+          "default": 47321,
+          "description": "Local port of the shared browser engine (also used by the MCP server)."
+        },
+        "claudeBrowser.homeUrl": {
+          "type": "string",
+          "default": "",
+          "description": "URL opened when the browser starts with nothing to restore. Empty shows the start page, which lists the dev servers running on this machine and recent pages."
+        },
+        "claudeBrowser.onPick": {
+          "type": "string",
+          "enum": [
+            "mention",
+            "clipboard",
+            "both"
+          ],
+          "default": "mention",
+          "description": "What picking an element does: add a short pick card (what the element is, where it is on the page, its source line when known) to the Claude Code prompt as an @-mentioned file, copy the card, or both. Claude fetches more detail with browser_inspect only when the task needs it."
+        },
+        "claudeBrowser.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Node.js used to run the browser engine (auto-detected when empty)."
+        },
+        "claudeBrowser.browser": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "system"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Use Claude Browser's own Chromium (downloaded once, about 200 MB, into ~/.claude-browser/chromium). An installed browser is only used while that download runs.",
+            "Use the Chrome, Edge or Brave installed on this machine and never download one."
+          ],
+          "description": "Which browser the engine runs."
+        },
+        "claudeBrowser.mode": {
+          "type": "string",
+          "enum": [
+            "panel",
+            "window",
+            "cursor"
+          ],
+          "default": "panel",
+          "enumDescriptions": [
+            "Headless Chrome streamed into a panel inside the editor (side-by-side view, custom popups).",
+            "Chrome as its own visible window next to the editor: drawn natively, always sharp, no streaming. Pick with ⌥⇧P in the page or “Claude Browser: Pick Element”; picks still go to the Claude prompt.",
+            "Cursor's own built-in Browser Tab, inside the editor: drawn natively by Cursor, driven by Claude over CDP. Needs Cursor started with --remote-debugging-port=9333 (“Claude Browser: Restart Cursor with Browser Control” does that)."
+          ],
+          "description": "Where the shared browser is shown. Changing it restarts the browser."
+        },
+        "claudeBrowser.chromePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a specific Chromium-based browser executable. Overrides claudeBrowser.browser."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "puppeteer-core": "^25.16.0",
+    "ws": "^8.22.2",
+    "zod": "^3.25.76"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mahan-sepehri/claude-browser.git"
+  }
+}

@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="cb-shell" content="1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Side by side</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #161618; color: #ececec; overflow: hidden; font: 12px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  #hdr { position: fixed; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 calc(var(--barw, 260px) + 6px); background: #202022; border-bottom: 1px solid #333336; user-select: none; -webkit-user-select: none; }
+  #hdr .grow { flex: 1; }
+  .chip { all: unset; box-sizing: border-box; padding: 5px 10px; border-radius: 7px; background: #2b2b2e; color: #a1a1a8; white-space: nowrap; cursor: default; }
+  .chip:hover { background: #36363a; color: #fff; }
+  .chip.on { background: #3f3f44; color: #fff; box-shadow: inset 0 0 0 1px #5a5a60; }
+  #fit { color: #8a8a90; min-width: 34px; text-align: right; }
+  select { all: unset; box-sizing: border-box; padding: 5px 22px 5px 10px; border-radius: 7px; background: #2b2b2e url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23a1a1a8' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 8px center / 9px; color: #ececec; }
+  #close { background: transparent; color: #a1a1a8; }
+  #close:hover { background: #36363a; color: #fff; }
+  #stage { position: fixed; left: 0; right: 0; top: 40px; bottom: 0; overflow: auto; display: flex; align-items: flex-start; justify-content: safe center; gap: 16px; padding: 14px 16px 16px; }
+  .pane { flex: none; display: flex; flex-direction: column; gap: 6px; }
+  .label { all: unset; align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 8px; margin-left: -4px; border-radius: 6px; color: #a1a1a8; cursor: default; }
+  .label:hover { background: #2b2b2e; color: #fff; }
+  .pane.lead .label { color: #f0b49e; }
+  .box { position: relative; overflow: hidden; background: #fff; border-radius: 4px; box-shadow: 0 0 0 1px #2e2e31, 0 8px 28px rgba(0,0,0,.35); }
+  .box iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: #fff; }
+  #menu { position: fixed; z-index: 10; min-width: 250px; max-height: calc(100vh - 60px); overflow: auto; background: #252527; border: 1px solid #3a3a3d; border-radius: 9px; padding: 4px; box-shadow: 0 10px 32px rgba(0,0,0,.45); }
+  #menu[hidden] { display: none; }
+  .mi { all: unset; box-sizing: border-box; display: flex; gap: 16px; width: 100%; padding: 6px 10px; border-radius: 6px; white-space: nowrap; cursor: default; }
+  .mi:hover { background: #d97757; color: #fff; }
+  .mi .hint { margin-left: auto; color: #8a8a90; font-size: 11px; }
+  .mi:hover .hint { color: #fff; }
+  .mi.checked::before { content: "✓"; width: 10px; margin-left: -4px; }
+  .mi:not(.checked)::before { content: ""; width: 10px; margin-left: -4px; }
+  .msep { height: 1px; background: #3a3a3d; margin: 4px 6px; }
+  .sizerow { display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
+  .sizerow input { all: unset; width: 54px; padding: 3px 6px; background: #151517; border: 1px solid #3a3a3d; border-radius: 6px; color: #fff; }
+  .sizerow input:focus { border-color: #d97757; }
+  .sizerow button { all: unset; padding: 3px 10px; border-radius: 6px; background: #d97757; color: #fff; }
+</style>
+</head>
+<body>
+<div id="hdr">
+  <span class="grow"></span>
+  <button class="chip" data-key="mobile">Mobile</button>
+  <button class="chip" data-key="tablet">Tablet</button>
+  <button class="chip" data-key="desktop">Desktop</button>
+  <button class="chip" id="touch" title="Phone and tablet panes act as touch devices: drag to scroll, touch events, no hover, a mobile user agent">Touch</button>
+  <span id="fit"></span>
+  <select id="scale" title="Size of the previews">
+    <option value="fit">Fit</option>
+    <option value="0.5">50%</option>
+    <option value="0.75">75%</option>
+    <option value="1">100%</option>
+  </select>
+  <button class="chip" id="close" title="Back to a single view">✕ Close</button>
+</div>
+<div id="stage"></div>
+<div id="menu" hidden></div>
+<script>window.__cbShellConfig = /*CONFIG*/null;</script>
+<script>
+(() => {
+  // The side-by-side view of Claude Browser (window mode). The engine serves
+  // this page in place of the app's own document, at the app's own address,
+  // so every pane is a same-origin iframe of the real page: one tab, one
+  // DevTools, the address bar showing the page. Panes follow the one you
+  // last used (navigation and scrolling).
+  const cfg = window.__cbShellConfig || { panes: [], primary: "desktop", scale: "fit" };
+  const $ = id => document.getElementById(id);
+  const stage = $("stage");
+  const menu = $("menu");
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const panes = new Map(); // key -> { key, info, el, box, frame, label, syncUntil, print }
+  const startUrl = location.href;
+  let primary = cfg.primary;
+  let leader = cfg.primary;
+  let scaleMode = cfg.scale || "fit";
+  let scale = 1;
+  let navSeq = 0;
+  let turn = Promise.resolve();
+  let touchOn = cfg.touch !== false;
+
+  const emit = msg => {
+    try {
+      return Promise.resolve(window.__cbEmit && window.__cbEmit(JSON.stringify({ t: "ui", ...msg }))).then(r => (typeof r === "string" && r ? JSON.parse(r) : null), () => null);
+    } catch {
+      return Promise.resolve(null);
+    }
+  };
+  const winOf = p => {
+    try {
+      return p.frame.contentWindow;
+    } catch {
+      return null;
+    }
+  };
+  const urlOf = p => {
+    try {
+      const u = p.frame.contentWindow.location.href;
+      return u === "about:blank" ? null : u;
+    } catch {
+      return null; // cross-origin
+    }
+  };
+
+  // All panes share one renderer, and Chrome lets a renderer have only so
+  // many requests in flight (about 2000; a dev server serves a couple of
+  // thousand modules per page). So a pane starts loading only while the tab
+  // has few requests open, and not before the previous pane has its page.
+  const INFLIGHT_OK = 400;
+  async function roomToLoad(max = 8000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < max) {
+      const r = await emit({ a: "inflight" });
+      if (!r || r.n < INFLIGHT_OK) return;
+      await sleep(60);
+    }
+  }
+
+  // Until the pane's new document has fired DOMContentLoaded (by then its
+  // module scripts are fetched and have run; reported by inpage.js), or max
+  // ms. (readyState leaves "loading" before module scripts are even fetched.)
+  async function parsed(p, f, since, max = 8000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < max) {
+      if (p.frame !== f || p.parsedAt >= since) return;
+      try {
+        // (The blank page before the load starts has origin "null".)
+        const loc = f.contentWindow.location;
+        if (loc.href !== "about:blank" && loc.origin !== location.origin) return; // can't tell
+      } catch {
+        return;
+      }
+      await sleep(40);
+    }
+  }
+
+  // Pane loads overlap but are started one at a time: the next starts once
+  // this one's page is parsed and the tab has room for more requests. (Two
+  // copies of an app starting at the very same moment can also trip over
+  // each other while they set up shared storage.) Resolves when the pane has
+  // finished loading.
+  function loadInTurn(p, start) {
+    let done;
+    const loaded = new Promise(r => (done = r));
+    const run = async () => {
+      if (panes.get(p.key) !== p) return done();
+      await roomToLoad();
+      const since = Date.now();
+      if ((await start()) === false) return done();
+      const f = p.frame;
+      Promise.race([new Promise(r => f.addEventListener("load", r, { once: true })), sleep(10000)]).then(done);
+      await parsed(p, f, since);
+    };
+    turn = turn.then(run, run);
+    return loaded;
+  }
+
+  let frameSeq = 0;
+  function newFrame(p) {
+    const frame = document.createElement("iframe");
+    frame.dataset.cbPane = p.key;
+    // A fresh name for every iframe: the tab's history then never refers to
+    // a pane's earlier pages, so Back moves only the pane you use (the
+    // others follow) instead of reloading every pane at once.
+    frame.name = `cb-pane-${p.key}-${++frameSeq}`;
+    if (p.info.mobile) frame.dataset.cbMobile = "1";
+    // Touch emulation (inpage.js reads these when the pane's page starts).
+    if (p.info.mobile && touchOn && cfg.ua && cfg.ua[p.key]) {
+      frame.dataset.cbTouch = "1";
+      frame.dataset.cbUa = cfg.ua[p.key];
+    }
+    frame.setAttribute("allow", "camera; microphone; clipboard-read; clipboard-write; fullscreen; display-capture; autoplay; geolocation; web-share");
+    frame.setAttribute("allowfullscreen", "");
+    frame.addEventListener("load", () => {
+      if (p.key === leader) mirror();
+    });
+    return frame;
+  }
+
+  // A follower that needs a real page load gets a new iframe (see newFrame).
+  function replaceFrame(p, url) {
+    const old = p.frame;
+    const frame = newFrame(p);
+    frame.style.cssText = old.style.cssText;
+    frame.src = url;
+    p.frame = frame;
+    old.replaceWith(frame);
+  }
+
+  function makePane(info) {
+    const el = document.createElement("div");
+    el.className = "pane";
+    const label = document.createElement("button");
+    label.className = "label";
+    label.title = "Choose another size";
+    const box = document.createElement("div");
+    box.className = "box";
+    el.append(label, box);
+    const p = { key: info.key, info, el, box, frame: null, label, syncUntil: 0, print: null };
+    p.frame = newFrame(p);
+    box.append(p.frame);
+    label.onclick = e => {
+      e.stopPropagation();
+      sizeMenu(p);
+    };
+    return p;
+  }
+
+  function setPanes(list, newPrimary) {
+    if (newPrimary) primary = newPrimary;
+    const keys = list.map(i => i.key);
+    for (const [k, p] of panes) {
+      if (!keys.includes(k)) {
+        p.el.remove();
+        panes.delete(k);
+      }
+    }
+    if (!panes.has(leader)) leader = primary;
+    const from = panes.get(leader) || panes.get(primary);
+    const url = (from && urlOf(from)) || location.href;
+    const order = ["mobile", "tablet", "desktop"];
+    const fresh = [];
+    for (const info of list) {
+      let p = panes.get(info.key);
+      if (!p) {
+        p = makePane(info);
+        panes.set(info.key, p);
+        fresh.push(p);
+      }
+      p.info = info;
+      p.frame.toggleAttribute("data-cb-mobile", !!info.mobile);
+      p.label.textContent = `${info.label} · ${info.name ? info.name + " · " : ""}${info.width}×${info.height} ▾`;
+    }
+    for (const k of order) if (panes.has(k)) stage.append(panes.get(k).el);
+    for (const c of document.querySelectorAll("#hdr .chip[data-key]")) c.classList.toggle("on", keys.includes(c.dataset.key));
+    // The pane Claude acts on loads first.
+    fresh.sort((a, b) => (a.key === primary ? -1 : b.key === primary ? 1 : 0));
+    for (const p of fresh) {
+      p.syncUntil = Date.now() + 30000;
+      loadInTurn(p, () => {
+        p.frame.src = url;
+      }).then(() => (p.syncUntil = Date.now() + 2500));
+    }
+    markLeader();
+    layout();
+  }
+
+  function layout() {
+    const shown = [...panes.values()];
+    if (!shown.length) return;
+    const W = stage.clientWidth - 32;
+    const H = stage.clientHeight - 30 - 26;
+    const gap = 16;
+    const sumW = shown.reduce((a, p) => a + p.info.width, 0);
+    const maxH = Math.max(...shown.map(p => p.info.height));
+    const fit = Math.max(0.1, Math.min(1, (W - gap * (shown.length - 1)) / sumW, H / maxH));
+    scale = scaleMode === "fit" ? fit : Number(scaleMode) || 1;
+    for (const p of shown) {
+      const { width, height } = p.info;
+      p.box.style.width = Math.round(width * scale) + "px";
+      p.box.style.height = Math.round(height * scale) + "px";
+      p.frame.style.width = width + "px";
+      p.frame.style.height = height + "px";
+      p.frame.style.transform = scale === 1 ? "" : `scale(${scale})`;
+      p.label.style.maxWidth = Math.max(120, Math.round(width * scale)) + "px";
+    }
+    $("fit").textContent = scaleMode === "fit" ? `${Math.round(scale * 100)}%` : "";
+    $("scale").value = scaleMode;
+  }
+
+  function markLeader() {
+    for (const p of panes.values()) p.el.classList.toggle("lead", panes.size > 1 && p.key === leader);
+  }
+
+  // The address bar and the tab title show the pane you are using.
+  function mirror() {
+    const p = panes.get(leader);
+    if (!p) return;
+    const u = urlOf(p);
+    if (u) {
+      try {
+        if (new URL(u).origin === location.origin && u !== location.href) history.replaceState(history.state, "", u);
+      } catch {}
+    }
+    const w = winOf(p);
+    try {
+      const t = w && w.document && w.document.title;
+      if (t && document.title !== t) document.title = t;
+      const icon = w && w.document.querySelector('link[rel~="icon"]');
+      const mine = document.querySelector('link[rel~="icon"]');
+      if (icon && icon.href && (!mine || mine.href !== icon.href)) {
+        const l = mine || document.head.appendChild(document.createElement("link"));
+        l.rel = "icon";
+        l.href = icon.href;
+      }
+    } catch {}
+  }
+  setInterval(mirror, 1000);
+
+  // ---------- following the pane in use ----------
+  function fromPane(key, msg) {
+    const src = panes.get(key);
+    if (!src) return;
+    if (msg.t === "parsed") {
+      src.parsedAt = Date.now();
+      return;
+    }
+    if (msg.t === "touched") {
+      if (leader !== key) {
+        leader = key;
+        markLeader();
+      }
+      return;
+    }
+    if (msg.t === "scroll") {
+      if (key !== leader || Date.now() < src.syncUntil) return;
+      for (const p of panes.values()) {
+        if (p === src) continue;
+        try {
+          winOf(p).__cb.syncScroll(msg.sel || "", msg.fx || 0, msg.fy || 0);
+        } catch {}
+      }
+      return;
+    }
+    if (msg.t === "nav") {
+      // A page loaded from scratch starts from the session as it is now.
+      if (!msg.within) emit({ a: "print", url: msg.url }).then(r => r && r.print && (src.print = r.print));
+      onPaneNav(src, msg.url, !!msg.within);
+    }
+  }
+
+  function onPaneNav(src, url, within) {
+    if (src.key === leader) mirror();
+    if (!/^(https?|file):/i.test(url || "")) return;
+    // A pane that is itself following must not lead (redirects would ping-pong).
+    if (Date.now() < src.syncUntil || src.key !== leader) return;
+    const seq = ++navSeq;
+    followNav(src, url, within, seq).catch(() => {});
+  }
+
+  async function followNav(src, url, within, seq) {
+    // Signing in or out in one pane changes the session every pane shares,
+    // while the others still hold the old state in memory. Changing only
+    // their route would run the app against stale state, so such panes get
+    // a real page load instead.
+    const r = within ? await emit({ a: "print", url }) : null;
+    const print = r && r.print;
+    if (seq !== navSeq) return; // a newer navigation took over
+    if (print) src.print = print;
+    for (const t of panes.values()) {
+      if (t === src) continue;
+      const cur = urlOf(t);
+      const stale = !!print && !!t.print && t.print !== print;
+      if (cur === url && !stale) continue;
+      t.syncUntil = Date.now() + 2500;
+      let sameOrigin = false;
+      try {
+        sameOrigin = !!cur && new URL(cur).origin === new URL(url).origin;
+      } catch {}
+      const go = () => {
+        t.syncUntil = Date.now() + 30000;
+        if (print) t.print = print;
+        return loadInTurn(t, () => {
+          if (seq !== navSeq) return false; // the view has moved on since
+          replaceFrame(t, url);
+        }).then(() => (t.syncUntil = Date.now() + 2500));
+      };
+      if (within && sameOrigin && !stale) {
+        // A client-side route change: every pane does the same in place, at
+        // once (a route change loads little, so there is no request flood to
+        // pace). replaceState, so Back stays one step per navigation.
+        try {
+          const w = t.frame.contentWindow;
+          w.history.replaceState(null, "", url);
+          w.dispatchEvent(new w.PopStateEvent("popstate", { state: null }));
+        } catch {
+          go();
+          continue;
+        }
+        // The app didn't take it (no router listening): load the page instead.
+        setTimeout(() => {
+          if (seq === navSeq && panes.get(t.key) === t && urlOf(src) === url && urlOf(t) !== url) go();
+        }, 600);
+      } else go();
+    }
+  }
+
+  // ---------- size menu (click on a pane's label) ----------
+  const SIZES = {
+    mobile: [["iPhone SE (1st gen)", 320, 568], ["Galaxy S / small Android", 360, 800], ["iPhone SE", 375, 667], ["iPhone 13 mini", 375, 812], ["iPhone 14", 390, 844], ["iPhone 15 / 16", 393, 852], ["Pixel 8", 412, 915], ["iPhone 15 Plus", 430, 932], ["iPhone 16 Pro Max", 440, 956]],
+    tablet: [["iPad mini", 744, 1133], ["iPad (classic)", 768, 1024], ["iPad Air", 820, 1180], ["iPad Pro 11″", 834, 1194], ["iPad Pro 13″", 1024, 1366], ["iPad Air landscape", 1180, 820]],
+    desktop: [["Small laptop", 1024, 768], ["Laptop", 1280, 800], ["Laptop HD", 1366, 768], ["MacBook Air", 1440, 900], ["Laptop 1536", 1536, 864], ["Full HD", 1920, 1080], ["QHD", 2560, 1440]],
+  };
+  const DEFAULT_SIZE = { mobile: "393x852", tablet: "820x1180", desktop: "1280x800" };
+
+  function closeMenu() {
+    menu.hidden = true;
+    menu.replaceChildren();
+  }
+  function sizeMenu(p) {
+    if (!menu.hidden) return closeMenu();
+    const info = p.info;
+    const set = (width, height, name) => {
+      closeMenu();
+      emit({ a: "multiSize", key: info.key, width, height, name: name || "" });
+    };
+    const mi = (label, hint, run, checked) => {
+      const b = document.createElement("button");
+      b.className = "mi" + (checked ? " checked" : "");
+      const l = document.createElement("span");
+      l.textContent = label;
+      const h = document.createElement("span");
+      h.className = "hint";
+      h.textContent = hint;
+      b.append(l, h);
+      b.onclick = run;
+      return b;
+    };
+    const kids = (SIZES[info.key] || []).map(([name, w, h]) => {
+      const dflt = DEFAULT_SIZE[info.key] === `${w}x${h}`;
+      return mi(name + (dflt ? " (default)" : ""), `${w}×${h}`, () => set(w, h, dflt ? "" : name), w === info.width && h === info.height);
+    });
+    const sep = () => Object.assign(document.createElement("div"), { className: "msep" });
+    const row = document.createElement("form");
+    row.className = "sizerow";
+    row.innerHTML = '<span>Custom</span><input name="w" type="number" min="240" max="3840" required><span>×</span><input name="h" type="number" min="240" max="3000" required><button type="submit">Set</button>';
+    row.w.value = info.width;
+    row.h.value = info.height;
+    row.onsubmit = e => {
+      e.preventDefault();
+      set(Number(row.w.value), Number(row.h.value), "");
+    };
+    menu.replaceChildren(...kids, sep(), mi("Rotate", `${info.height}×${info.width}`, () => set(info.height, info.width, info.name)), sep(), row);
+    menu.hidden = false;
+    const r = p.label.getBoundingClientRect();
+    menu.style.left = Math.max(4, Math.min(r.left, innerWidth - menu.offsetWidth - 4)) + "px";
+    menu.style.top = Math.max(4, Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - 4)) + "px";
+  }
+  window.addEventListener("pointerdown", e => {
+    if (!menu.hidden && !menu.contains(e.target)) closeMenu();
+  }, true);
+  window.addEventListener("keydown", e => e.key === "Escape" && closeMenu());
+  window.addEventListener("blur", () => setTimeout(() => {
+    // Focus moving into a pane counts as leaving the menu.
+    if (document.activeElement && document.activeElement.tagName === "IFRAME") closeMenu();
+  }, 0));
+
+  // ---------- header controls ----------
+  for (const c of document.querySelectorAll("#hdr .chip[data-key]")) {
+    c.onclick = () => {
+      const keys = new Set(panes.keys());
+      if (keys.has(c.dataset.key)) keys.delete(c.dataset.key);
+      else keys.add(c.dataset.key);
+      if (keys.size < 2) return window.__cbUi && window.__cbUi.toast("Keep at least two sizes, or close the side-by-side view");
+      emit({ a: "multiKeys", keys: [...keys] });
+    };
+  }
+  $("scale").onchange = e => {
+    scaleMode = e.target.value;
+    layout();
+    emit({ a: "multiScale", value: scaleMode });
+  };
+  $("close").onclick = () => emit({ a: "multi", on: false });
+  const touchChip = () => $("touch").classList.toggle("on", touchOn);
+  touchChip();
+  $("touch").onclick = () => {
+    touchOn = !touchOn;
+    touchChip();
+    emit({ a: "touch", on: touchOn });
+    // Touch is set up when a page starts: reload the phone and tablet panes.
+    for (const p of panes.values()) {
+      if (!p.info.mobile) continue;
+      const url = urlOf(p) || location.href;
+      p.syncUntil = Date.now() + 30000;
+      loadInTurn(p, () => replaceFrame(p, url)).then(() => (p.syncUntil = Date.now() + 2500));
+    }
+  };
+  window.addEventListener("resize", layout);
+
+  window.__cbShell = {
+    setPanes,
+    fromPane,
+    setBarWidth: w => document.documentElement.style.setProperty("--barw", Math.max(120, w) + "px"),
+    paneRect(key) {
+      const p = panes.get(key);
+      if (!p) return null;
+      const r = p.frame.getBoundingClientRect();
+      return { key, x: r.left, y: r.top, width: r.width, height: r.height, s: scale, cssWidth: p.info.width, cssHeight: p.info.height };
+    },
+    paneAt(x, y) {
+      for (const p of panes.values()) {
+        const b = p.box.getBoundingClientRect();
+        if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) {
+          const r = p.frame.getBoundingClientRect();
+          return { key: p.key, rect: { x: Math.max(r.left, b.left), y: Math.max(r.top, b.top), width: Math.min(r.right, b.right) - Math.max(r.left, b.left), height: Math.min(r.bottom, b.bottom) - Math.max(r.top, b.top) }, s: scale };
+        }
+      }
+      return null;
+    },
+    leaderUrl: () => urlOf(panes.get(leader) || panes.get(primary) || {}) || location.href,
+    leader: () => leader,
+    stageTop: () => stage.getBoundingClientRect().top,
+  };
+
+  setPanes(cfg.panes || [], cfg.primary);
+})();
+</script>
+</body>
+</html>
