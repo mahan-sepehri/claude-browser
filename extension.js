@@ -11,6 +11,18 @@ const { execFileSync } = require("child_process");
 const { ensureEngine, stopEngine, writeConfig, LOG_FILE, HOME } = require("./daemon/launcher.js");
 
 const VIEW_TYPE = "claudeBrowser.panel";
+
+// A small log of what the editor side does (bridge, picks, mentions), next to
+// the engine's own log, for troubleshooting.
+const EXT_LOG = path.join(HOME, "extension.log");
+function xlog(...parts) {
+  try {
+    fs.mkdirSync(HOME, { recursive: true });
+    if (fs.existsSync(EXT_LOG) && fs.statSync(EXT_LOG).size > 512 * 1024) fs.renameSync(EXT_LOG, EXT_LOG + ".1");
+    const text = parts.map(p => (p instanceof Error ? p.stack || p.message : typeof p === "string" ? p : JSON.stringify(p))).join(" ");
+    fs.appendFileSync(EXT_LOG, `[${new Date().toISOString()}] ${text}\n`);
+  } catch {}
+}
 let panel = null;
 let engine = null;
 let ensuring = null;
@@ -147,8 +159,13 @@ function connectBridge() {
         } catch {
           return;
         }
-        if (msg.t === "hello") b.id = msg.id;
-        else if (msg.t === "picked" && msg.requester === b.id) onPick(msg).catch(err => console.error("[claude-browser]", err));
+        if (msg.t === "hello") {
+          b.id = msg.id;
+          xlog("bridge connected", b.id);
+        } else if (msg.t === "picked") {
+          xlog("picked", msg.kind || "element", msg.id || "", msg.requester === b.id ? "for this window" : `for ${msg.requester} (this window is ${b.id})`);
+          if (msg.requester === b.id) onPick(msg).catch(err => xlog("pick failed", err));
+        }
         else if (msg.t === "openCursorBrowser") {
           // The engine sends this to one window only (the one focused last).
           vscode.commands.executeCommand("workbench.action.openBrowserEditor", { url: msg.url, inactive: !!msg.background }).then(undefined, err => console.error("[claude-browser]", err));
@@ -410,10 +427,13 @@ async function deliverPickCard(pick, mode) {
     return;
   }
   const file = writePickFile(`pick-${pick.id || Date.now()}.md`, pick.report);
+  xlog("pick card written", file);
   try {
     const session = await mentionFile(file);
+    xlog("pick mentioned in Claude Code", session ? session.label : "");
     vscode.window.setStatusBarMessage(`$(target) Pick ${pick.id || ""} added to the Claude prompt${session ? ` (${session.label})` : ""}`, 4000);
-  } catch {
+  } catch (err) {
+    xlog("mention failed, copied instead", err);
     await vscode.env.clipboard.writeText(pick.report);
     vscode.window.setStatusBarMessage("$(target) Claude Code isn't available — pick copied to the clipboard instead", 5000);
   }
@@ -606,6 +626,7 @@ async function offerMcpRegistration(context) {
 
 function activate(context) {
   extCtx = context;
+  xlog("activate", require("./package.json").version, vscode.env.appName, `mode=${mode()}`);
   writeMcpShim(context.extensionPath);
   setTimeout(() => offerMcpRegistration(context).catch(() => {}), 3000);
   trackClaudeTab();

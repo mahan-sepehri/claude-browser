@@ -719,6 +719,7 @@ class Engine {
       fs.rmSync(path.join(PROFILE, "SingletonLock"), { force: true });
     } catch {}
     const pick = await this.chooseBrowser();
+    this.writeDownloadPrefs();
     const executablePath = pick.executablePath;
     this.executablePath = executablePath;
     this.browserInfo = pick;
@@ -1158,6 +1159,7 @@ class Engine {
     try {
       tab.id = (await cdp.send("Target.getTargetInfo")).targetInfo.targetId;
     } catch {}
+    this.watchDownloads(tab);
     await cdp.send("Page.enable").catch(() => {});
     this.watchNetwork(tab);
     // Pages behave as focused (carets, :focus, timers) whichever window is in front.
@@ -1517,36 +1519,85 @@ class Engine {
   // ---------- downloads ----------
   async setupDownloads() {
     try {
-      const cdp = await this.browser.target().createCDPSession();
-      this.browserCdp = cdp;
-      fs.mkdirSync(DOWNLOAD_TMP, { recursive: true });
-      await cdp.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: DOWNLOAD_TMP, eventsEnabled: true });
-      cdp.on("Browser.downloadWillBegin", ev => {
-        const d = { guid: ev.guid, url: ev.url, name: ev.suggestedFilename || "download", state: "inProgress", received: 0, total: 0, path: null, at: Date.now() };
-        this.downloads.unshift(d);
-        this.downloads.length = Math.min(this.downloads.length, 30);
-        this.broadcast({ t: "download", ...d });
-      });
-      cdp.on("Browser.downloadProgress", ev => {
-        const d = this.downloads.find(x => x.guid === ev.guid);
-        if (!d) return;
-        d.received = ev.receivedBytes;
-        d.total = ev.totalBytes;
-        if (ev.state === "completed" && d.state !== "completed") {
-          d.state = "completed";
-          d.path = this.finishDownload(d);
-          this.broadcast({ t: "download", ...d });
-        } else if (ev.state === "canceled") {
-          d.state = "canceled";
-          this.broadcast({ t: "download", ...d });
-        }
-      });
+      this.browserCdp = await this.browser.target().createCDPSession();
     } catch (e) {
-      log("downloads setup", e.message);
+      log("browser session", e.message);
+    }
+    // No Browser.setDownloadBehavior: any call to it routes every download
+    // through DevTools' own download delegate, which drops "Show in Finder"
+    // and "Open" on chrome://downloads. Chrome's normal download logic saves
+    // into ~/Downloads (set in the profile by writeDownloadPrefs) under the
+    // real name, "name (1).ext" on a clash; each tab reports its downloads
+    // through Page.download* events (see watchDownloads).
+    try {
+      fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+    } catch {}
+  }
+
+  // Page-level download events: these fire without taking downloads over.
+  watchDownloads(tab) {
+    if (CURSOR_MODE || tab.mirror) return;
+    tab.cdp.on("Page.downloadWillBegin", ev => {
+      if (this.downloads.some(x => x.guid === ev.guid)) return;
+      const d = { guid: ev.guid, url: ev.url, name: ev.suggestedFilename || "download", state: "inProgress", received: 0, total: 0, path: null, at: Date.now() };
+      this.downloads.unshift(d);
+      this.downloads.length = Math.min(this.downloads.length, 30);
+      this.broadcast({ t: "download", ...d });
+    });
+    tab.cdp.on("Page.downloadProgress", ev => {
+      const d = this.downloads.find(x => x.guid === ev.guid);
+      if (!d || d.state !== "inProgress") return;
+      d.received = ev.receivedBytes;
+      d.total = ev.totalBytes;
+      if (ev.state === "completed") {
+        d.state = "completed";
+        d.path = ev.filePath || this.guessDownloadPath(d);
+        this.broadcast({ t: "download", ...d });
+      } else if (ev.state === "canceled") {
+        d.state = "canceled";
+        this.broadcast({ t: "download", ...d });
+      }
+    });
+  }
+
+  // Points the profile's download folder at ~/Downloads, without asking where
+  // to save. Runs before launch: Chrome reads Preferences at startup.
+  writeDownloadPrefs() {
+    const file = path.join(PROFILE, "Default", "Preferences");
+    try {
+      let prefs = {};
+      try {
+        prefs = JSON.parse(fs.readFileSync(file, "utf8")) || {};
+      } catch {}
+      prefs.download = { ...(prefs.download || {}), default_directory: DOWNLOAD_DIR, prompt_for_download: false, directory_upgrade: true };
+      prefs.savefile = { ...(prefs.savefile || {}), default_directory: DOWNLOAD_DIR };
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(prefs));
+    } catch (e) {
+      log("download prefs", e.message);
     }
   }
 
-  // Chrome saved it under its GUID; move it to ~/Downloads with a unique name.
+  // Older Chromium doesn't report filePath; find the newest file Chrome could
+  // have given this download ("name.ext", "name (1).ext", ...).
+  guessDownloadPath(d) {
+    const safe = path.basename(d.name) || "download";
+    const ext = path.extname(safe);
+    const base = safe.slice(0, safe.length - ext.length);
+    let best = null;
+    try {
+      for (const f of fs.readdirSync(DOWNLOAD_DIR)) {
+        if (f !== safe && !(f.startsWith(base + " (") && f.endsWith(")" + ext))) continue;
+        const full = path.join(DOWNLOAD_DIR, f);
+        const m = fs.statSync(full).mtimeMs;
+        if (!best || m > best.m) best = { full, m };
+      }
+    } catch {}
+    return best ? best.full : path.join(DOWNLOAD_DIR, safe);
+  }
+
+  // Saves a file we fetched ourselves (staged under DOWNLOAD_TMP/<guid>) into
+  // ~/Downloads with a unique name.
   finishDownload(d) {
     const src = path.join(DOWNLOAD_TMP, d.guid);
     const safe = path.basename(d.name).replace(/[\/\\:*?"<>|]/g, "_") || "download";

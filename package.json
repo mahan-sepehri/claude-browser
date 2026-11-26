@@ -2,7 +2,7 @@
   "name": "claude-browser",
   "displayName": "Claude Browser",
   "description": "A live browser inside VS Code and Cursor, shared with Claude Code: you and Claude see and drive the same tab. Pick elements into the prompt, verify changes after hot reload, measure, fill forms, test every screen size.",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "publisher": "mahan-sepehri",
   "license": "MIT",
   "engines": {
